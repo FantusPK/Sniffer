@@ -1,0 +1,2 @@
+[console_scripts]
+sniffer = sniffer.app:main

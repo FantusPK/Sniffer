@@ -1,0 +1,4 @@
+pyserial>=3.5
+
+[build]
+pyinstaller>=6.0

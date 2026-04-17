@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sniffer"
+version = "1.0.0"
+description = "Modular RS-485 bus protocol sniffer"
+requires-python = ">=3.10"
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+
+[project.scripts]
+sniffer = "sniffer.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
