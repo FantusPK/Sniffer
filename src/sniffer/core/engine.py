@@ -78,8 +78,30 @@ class SnifferEngine:
     def current_baud(self) -> int:
         return self._baud_rates[self._baud_index] if self._baud_rates else 9600
 
-    def start(self, port: str, callbacks: EngineCallbacks) -> None:
-        """Open *port* and begin sniffing in a background thread."""
+    def start(
+        self,
+        port: str,
+        callbacks: EngineCallbacks,
+        *,
+        serial_override: object | None = None,
+    ) -> None:
+        """Open *port* and begin sniffing in a background thread.
+
+        Parameters
+        ----------
+        port:
+            Serial port name (e.g. ``"COM3"``).  Ignored when
+            *serial_override* is supplied.
+        callbacks:
+            Engine event callbacks.
+        serial_override:
+            Optional pre-built object that implements the
+            ``serial.Serial`` interface (``in_waiting``, ``read``,
+            ``baudrate``, ``is_open``, ``rts``, ``dtr``,
+            ``reset_input_buffer``, ``close``).  When provided the
+            engine skips opening a real COM port -- used by the
+            simulator.
+        """
         if self._running:
             return
 
@@ -87,33 +109,40 @@ class SnifferEngine:
         self._running = True
         self._reset_detection()
 
-        try:
-            self._serial = serial.Serial(
-                port=port,
-                baudrate=self._baud_rates[0],
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=1,
-                rtscts=False,
-                dsrdtr=False,
-            )
-            self._serial.rts = False
-            self._serial.dtr = False
-        except Exception as exc:
-            self._running = False
-            self._emit_error(f"Failed to open port: {exc}")
-            raise
+        if serial_override is not None:
+            self._serial = serial_override  # type: ignore[assignment]
+        else:
+            try:
+                self._serial = serial.Serial(
+                    port=port,
+                    baudrate=self._baud_rates[0],
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    timeout=1,
+                    rtscts=False,
+                    dsrdtr=False,
+                )
+                self._serial.rts = False
+                self._serial.dtr = False
+            except Exception as exc:
+                self._running = False
+                self._emit_error(f"Failed to open port: {exc}")
+                raise
 
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
         self._emit_baud(str(self._baud_rates[0]))
         rates_str = ", ".join(str(b) for b in self._baud_rates)
-        self._emit_log(
-            f"Sniffer started on {port} \u00b7 Auto-baud ON \u00b7 RTS/DTR suppressed",
-        )
-        self._emit_log(f"Trying baud rates: {rates_str} \u00b7 2 s timeout per rate")
+
+        if serial_override is not None:
+            self._emit_log("Sniffer started · SIMULATION MODE · RTS/DTR suppressed")
+        else:
+            self._emit_log(
+                f"Sniffer started on {port} · Auto-baud ON · RTS/DTR suppressed",
+            )
+        self._emit_log(f"Trying baud rates: {rates_str} · 2 s timeout per rate")
 
     def stop(self) -> None:
         self._running = False
@@ -227,7 +256,7 @@ class SnifferEngine:
                     self._buffers[name].clear()
 
             self._emit_log(
-                f"\u2713 Protocol locked: {decoder.name} "
+                f"✓ Protocol locked: {decoder.name} "
                 f"({self._decoder_hits[decoder.name]} consecutive valid packets)",
             )
             self._emit_protocol(decoder.name)
@@ -266,7 +295,7 @@ class SnifferEngine:
             self._decoder_hits[name] = 0
 
         self._emit_baud(str(new_baud))
-        self._emit_log(f"No confident lock \u00b7 trying {new_baud} baud")
+        self._emit_log(f"No confident lock · trying {new_baud} baud")
 
     def _advance_baud_confidence(self) -> None:
         if self._baud_locked:
@@ -280,9 +309,9 @@ class SnifferEngine:
 
         if self._baud_confidence >= self.BAUD_LOCK_THRESHOLD:
             self._baud_locked = True
-            self._emit_baud(f"{baud} \u2713")
+            self._emit_baud(f"{baud} ✓")
             self._emit_log(
-                f"\u2713 Baud rate locked at {baud} "
+                f"✓ Baud rate locked at {baud} "
                 f"({self._baud_confidence} consecutive valid packets)",
             )
 

@@ -13,7 +13,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [1/3] Installing package + build deps...
+echo [1/4] Installing package + build deps...
 pip install -e ".[build]" --quiet
 if errorlevel 1 (
     echo ERROR: pip install failed.
@@ -23,13 +23,18 @@ if errorlevel 1 (
 echo       Done.
 echo.
 
-echo [2/3] Cleaning old build...
+echo [2/4] Closing any running Sniffer instance...
+taskkill /f /im Sniffer.exe >nul 2>&1
+echo       Done.
+echo.
+
+echo [3/4] Cleaning old build...
 if exist dist\Sniffer.exe del /f /q dist\Sniffer.exe
 if exist build rmdir /s /q build
 echo       Done.
 echo.
 
-echo [3/3] Building exe...
+echo [4/4] Building exe...
 python -m PyInstaller --onefile --windowed --name Sniffer src\sniffer\__main__.py
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
@@ -42,4 +47,6 @@ echo  Build complete!
 echo  Exe: dist\Sniffer.exe
 echo ================================
 echo.
-pause
+
+echo Launching Sniffer...
+start "" "dist\Sniffer.exe"

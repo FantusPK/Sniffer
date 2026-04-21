@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Logs
+Logs/
+
+# VSCode
+.vscode/

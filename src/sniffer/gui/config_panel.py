@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import filedialog, ttk
+from typing import Callable
 
 from sniffer.gui import theme
 
@@ -14,10 +15,11 @@ class ConfigPanel(tk.Frame):
     def __init__(
         self,
         parent: tk.Widget,
+        *,
         port_var: tk.StringVar,
         addr_var: tk.StringVar,
         dir_var: tk.StringVar,
-        on_refresh: callable,
+        on_refresh: Callable[[], None],
     ) -> None:
         super().__init__(
             parent,

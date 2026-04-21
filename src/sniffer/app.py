@@ -15,6 +15,8 @@ from sniffer.core.engine import EngineCallbacks, SnifferEngine
 from sniffer.core.exporter import export_csv
 from sniffer.gui.main_window import MainWindow
 from sniffer.protocols import get_decoders
+from sniffer.sim.serial_sim import SimulatedSerial
+from sniffer.sim.traffic import make_generator
 
 
 def _default_log_dir() -> str:
@@ -48,6 +50,7 @@ class SnifferApp:
         self.protocol_detected = tk.StringVar(value="\u2014")
         self.current_baud = tk.StringVar(value="9600")
         self.status_text = tk.StringVar(value="Idle")
+        self.sim_protocol = tk.StringVar(value="BACnet-MSTP")
 
         self.target_address: int = 1
         self._rows_lock = threading.Lock()
@@ -70,9 +73,11 @@ class SnifferApp:
             protocol_var=self.protocol_detected,
             baud_var=self.current_baud,
             status_var=self.status_text,
+            sim_protocol_var=self.sim_protocol,
             on_refresh_ports=self._refresh_ports,
             on_start=self._start,
             on_stop=self._stop,
+            on_simulate=self._simulate,
             on_export=self._export,
             on_clear=self._clear,
         )
@@ -105,6 +110,40 @@ class SnifferApp:
             )
             return
 
+        self._launch(port=port, addr_str=addr_str, sim_serial=None)
+
+    def _simulate(self) -> None:
+        """Start the engine with a simulated serial port."""
+        addr_str = self.device_address.get().strip()
+        save_dir = self.save_dir.get().strip()
+
+        if not addr_str.isdigit() or not (1 <= int(addr_str) <= 255):
+            self._log_all(f"[{self._ts()}] !! Device address must be 1\u2013255.")
+            return
+        if not save_dir or not os.path.isdir(save_dir):
+            self._log_all(
+                f"[{self._ts()}] !! Please select a valid save directory.",
+            )
+            return
+
+        proto = self.sim_protocol.get() or "BACnet-MSTP"
+        gen = make_generator(proto)
+        sim_serial = SimulatedSerial(gen, packets_per_second=5.0)
+
+        self._log_all(
+            f"[{self._ts()}] \u2500\u2500 Starting SIMULATION "
+            f"(\u00b7 Protocol: {proto} \u00b7 5 pkt/s) \u2500\u2500",
+        )
+        self._launch(port="SIM", addr_str=addr_str, sim_serial=sim_serial)
+
+    def _launch(
+        self,
+        *,
+        port: str,
+        addr_str: str,
+        sim_serial: object | None,
+    ) -> None:
+        """Shared start logic for both real and simulated sessions."""
         self.target_address = int(addr_str)
         self.status_text.set("LIVE")
         self.protocol_detected.set("detecting\u2026")
@@ -128,14 +167,15 @@ class SnifferApp:
         )
 
         try:
-            self.engine.start(port, callbacks)
+            self.engine.start(port, callbacks, serial_override=sim_serial)
         except Exception:
             self.status_text.set("ERROR")
             self.window.controls.set_sniffing(False)
             return
 
+        label = port if sim_serial is None else f"SIMULATION ({self.sim_protocol.get()})"
         self._log_all(
-            f"[{self._ts()}] \u2500\u2500 Sniffer started on {port} "
+            f"[{self._ts()}] \u2500\u2500 Sniffer started on {label} "
             f"\u00b7 Target: device {self.target_address} \u2500\u2500",
         )
         self._log_target(

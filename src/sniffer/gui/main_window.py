@@ -34,10 +34,12 @@ class MainWindow:
         protocol_var: tk.StringVar,
         baud_var: tk.StringVar,
         status_var: tk.StringVar,
+        sim_protocol_var: tk.StringVar,
         # callbacks
         on_refresh_ports: Callable[[], None],
         on_start: Callable[[], None],
         on_stop: Callable[[], None],
+        on_simulate: Callable[[], None],
         on_export: Callable[[], None],
         on_clear: Callable[[], None],
     ) -> None:
@@ -61,7 +63,10 @@ class MainWindow:
 
         # ── config panel ──────────────────────────────────────────────
         self.config = ConfigPanel(
-            root, port_var, addr_var, dir_var,
+            root,
+            port_var=port_var,
+            addr_var=addr_var,
+            dir_var=dir_var,
             on_refresh=on_refresh_ports,
         )
         self.config.pack(fill="x", padx=16, pady=(0, 8))
@@ -71,8 +76,10 @@ class MainWindow:
             root,
             on_start=on_start,
             on_stop=on_stop,
+            on_simulate=on_simulate,
             on_export=on_export,
             on_clear=on_clear,
+            sim_protocol_var=sim_protocol_var,
         )
         self.controls.pack(fill="x", padx=16, pady=(0, 8))
 

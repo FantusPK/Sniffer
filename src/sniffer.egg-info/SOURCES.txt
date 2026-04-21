@@ -22,3 +22,8 @@ src/sniffer/protocols/__init__.py
 src/sniffer/protocols/bacnet_mstp.py
 src/sniffer/protocols/base.py
 src/sniffer/protocols/n2.py
+src/sniffer/sim/__init__.py
+src/sniffer/sim/bacnet_frames.py
+src/sniffer/sim/n2_frames.py
+src/sniffer/sim/serial_sim.py
+src/sniffer/sim/traffic.py
