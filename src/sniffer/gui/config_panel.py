@@ -10,7 +10,10 @@ from sniffer.gui import theme
 
 
 class ConfigPanel(tk.Frame):
-    """Top configuration bar with port, address, and save-directory pickers."""
+    """Top configuration bar with port, address, protocol, and save-directory pickers."""
+
+    PROTOCOL_OPTIONS = ["Auto-detect", "BACnet-MSTP", "N2"]
+    BAUD_OPTIONS = ["Auto-detect", "9600", "19200", "38400", "57600", "76800", "115200"]
 
     def __init__(
         self,
@@ -19,6 +22,8 @@ class ConfigPanel(tk.Frame):
         port_var: tk.StringVar,
         addr_var: tk.StringVar,
         dir_var: tk.StringVar,
+        selected_protocol_var: tk.StringVar,
+        selected_baud_var: tk.StringVar,
         on_refresh: Callable[[], None],
     ) -> None:
         super().__init__(
@@ -32,8 +37,10 @@ class ConfigPanel(tk.Frame):
         self._port_var = port_var
         self._addr_var = addr_var
         self._dir_var = dir_var
+        self._selected_protocol_var = selected_protocol_var
+        self._selected_baud_var = selected_baud_var
 
-        # ── row 1: port + address ─────────────────────────────────────
+        # ── row 1: port + address + protocol ──────────────────────────
         row1 = tk.Frame(self, bg=theme.PANEL)
         row1.pack(fill="x", pady=(0, 8))
 
@@ -42,9 +49,17 @@ class ConfigPanel(tk.Frame):
             fg=theme.MUTED, font=theme.FONT_MONO_XS,
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
-            row1, text="DEVICE ADDRESS (1\u2013255)", bg=theme.PANEL,
+            row1, text="DEVICE ADDRESS (1–255)", bg=theme.PANEL,
             fg=theme.MUTED, font=theme.FONT_MONO_XS,
         ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+        tk.Label(
+            row1, text="PROTOCOL", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=4, sticky="w", padx=(16, 0))
+        tk.Label(
+            row1, text="BAUD RATE", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=6, sticky="w", padx=(16, 0))
 
         self.port_combo = ttk.Combobox(
             row1, textvariable=self._port_var, width=18, state="readonly",
@@ -52,7 +67,7 @@ class ConfigPanel(tk.Frame):
         self.port_combo.grid(row=1, column=0, sticky="w")
 
         tk.Button(
-            row1, text="\u27f3", bg=theme.PANEL, fg=theme.ACCENT, bd=0,
+            row1, text="⟳", bg=theme.PANEL, fg=theme.ACCENT, bd=0,
             font=theme.FONT_REFRESH, cursor="hand2", command=on_refresh,
         ).grid(row=1, column=1, padx=4)
 
@@ -60,6 +75,18 @@ class ConfigPanel(tk.Frame):
             row1, textvariable=self._addr_var, width=8,
         )
         self.addr_entry.grid(row=1, column=2, sticky="w", padx=(16, 0))
+
+        self.proto_combo = ttk.Combobox(
+            row1, textvariable=self._selected_protocol_var,
+            values=self.PROTOCOL_OPTIONS, width=14, state="readonly",
+        )
+        self.proto_combo.grid(row=1, column=4, sticky="w", padx=(16, 0))
+
+        self.baud_combo = ttk.Combobox(
+            row1, textvariable=self._selected_baud_var,
+            values=self.BAUD_OPTIONS, width=13, state="readonly",
+        )
+        self.baud_combo.grid(row=1, column=6, sticky="w", padx=(16, 0))
 
         # ── row 2: save directory ─────────────────────────────────────
         row2 = tk.Frame(self, bg=theme.PANEL)
@@ -76,7 +103,7 @@ class ConfigPanel(tk.Frame):
         self.dir_entry.grid(row=1, column=0, sticky="w")
 
         tk.Button(
-            row2, text="Browse\u2026", bg=theme.INPUT_BG, fg=theme.TEXT,
+            row2, text="Browse…", bg=theme.INPUT_BG, fg=theme.TEXT,
             bd=0, font=theme.FONT_MONO_SM, cursor="hand2", padx=8, pady=4,
             command=self._browse,
         ).grid(row=1, column=1, padx=(8, 0))

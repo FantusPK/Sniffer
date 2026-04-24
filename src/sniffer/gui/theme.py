@@ -72,3 +72,24 @@ def apply(root) -> None:  # noqa: ANN001 – tk.Tk but avoids import
         background=[("selected", BG)],
         foreground=[("selected", ACCENT)],
     )
+    style.configure(
+        "Presence.Treeview",
+        background=LOG_BG,
+        foreground=TEXT,
+        fieldbackground=LOG_BG,
+        font=FONT_MONO_SM,
+        rowheight=22,
+        borderwidth=0,
+    )
+    style.configure(
+        "Presence.Treeview.Heading",
+        background=PANEL,
+        foreground=MUTED,
+        font=FONT_MONO_SM,
+        relief="flat",
+    )
+    style.map(
+        "Presence.Treeview",
+        background=[("selected", PANEL)],
+        foreground=[("selected", ACCENT)],
+    )

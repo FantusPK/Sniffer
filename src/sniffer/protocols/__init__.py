@@ -31,6 +31,15 @@ def get_decoders() -> list[ProtocolDecoder]:
     return sorted((cls() for cls in _registry), key=lambda d: d.priority)
 
 
+def get_decoders_for(selection: str) -> list[ProtocolDecoder]:
+    """Return decoders filtered by *selection* (a decoder name, or '' / 'Auto-detect' for all)."""
+    all_decoders = get_decoders()
+    if not selection or selection == "Auto-detect":
+        return all_decoders
+    filtered = [d for d in all_decoders if d.name == selection]
+    return filtered if filtered else all_decoders
+
+
 # Importing the modules triggers their @register decorators.
 from . import bacnet_mstp as _bac  # noqa: E402, F401
 from . import n2 as _n2  # noqa: E402, F401

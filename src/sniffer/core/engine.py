@@ -41,7 +41,9 @@ class SnifferEngine:
     """Protocol-agnostic serial sniffer with auto-baud detection."""
 
     BAUD_LOCK_THRESHOLD = 3
-    BAUD_TIMEOUT = 2.0  # seconds before trying next baud rate
+    BAUD_TIMEOUT = 2.0          # seconds before trying next baud rate (cold)
+    BAUD_TIMEOUT_EXTENDED = 7.0  # timeout after valid traffic seen at current baud
+    STATS_LOG_INTERVAL = 5.0    # seconds between diagnostic stats log lines
 
     def __init__(self, decoders: list[ProtocolDecoder]) -> None:
         self._decoders = sorted(decoders, key=lambda d: d.priority)
@@ -59,6 +61,7 @@ class SnifferEngine:
         self._baud_index = 0
         self._baud_confidence = 0
         self._baud_locked = False
+        self._had_traffic = False  # any valid packet seen at current baud rate
 
         # protocol lock state
         self._proto_locked = False
@@ -67,6 +70,10 @@ class SnifferEngine:
 
         # display label tracking
         self._proto_counts: dict[str, int] = {}
+
+        # diagnostic counters (cumulative over session)
+        self._byte_count = 0
+        self._frame_count = 0
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -84,6 +91,7 @@ class SnifferEngine:
         callbacks: EngineCallbacks,
         *,
         serial_override: object | None = None,
+        forced_baud: int | None = None,
     ) -> None:
         """Open *port* and begin sniffing in a background thread.
 
@@ -101,6 +109,9 @@ class SnifferEngine:
             ``reset_input_buffer``, ``close``).  When provided the
             engine skips opening a real COM port -- used by the
             simulator.
+        forced_baud:
+            When provided, the engine opens at this rate and skips
+            all baud rotation.  ``None`` enables auto-baud.
         """
         if self._running:
             return
@@ -108,6 +119,10 @@ class SnifferEngine:
         self._cb = callbacks
         self._running = True
         self._reset_detection()
+
+        if forced_baud is not None:
+            self._baud_rates = [forced_baud]
+            self._baud_locked = True
 
         if serial_override is not None:
             self._serial = serial_override  # type: ignore[assignment]
@@ -134,15 +149,19 @@ class SnifferEngine:
         self._thread.start()
 
         self._emit_baud(str(self._baud_rates[0]))
-        rates_str = ", ".join(str(b) for b in self._baud_rates)
 
         if serial_override is not None:
             self._emit_log("Sniffer started · SIMULATION MODE · RTS/DTR suppressed")
+        elif forced_baud is not None:
+            self._emit_log(
+                f"Sniffer started on {port} · Baud fixed at {forced_baud} · RTS/DTR suppressed",
+            )
         else:
+            rates_str = ", ".join(str(b) for b in self._baud_rates)
             self._emit_log(
                 f"Sniffer started on {port} · Auto-baud ON · RTS/DTR suppressed",
             )
-        self._emit_log(f"Trying baud rates: {rates_str} · 2 s timeout per rate")
+            self._emit_log(f"Trying baud rates: {rates_str} · 2 s timeout per rate")
 
     def stop(self) -> None:
         self._running = False
@@ -154,16 +173,24 @@ class SnifferEngine:
 
     def _loop(self) -> None:
         last_traffic = time.time()
+        last_stats = time.time()
 
         while self._running:
             try:
                 now = time.time()
 
-                # auto-baud rotation
-                if (
-                    not self._baud_locked
-                    and now - last_traffic > self.BAUD_TIMEOUT
-                ):
+                # periodic diagnostic stats line
+                if now - last_stats >= self.STATS_LOG_INTERVAL:
+                    self._emit_stats_log()
+                    last_stats = now
+
+                # auto-baud rotation — longer window once we've seen traffic
+                timeout = (
+                    self.BAUD_TIMEOUT_EXTENDED
+                    if self._had_traffic
+                    else self.BAUD_TIMEOUT
+                )
+                if not self._baud_locked and now - last_traffic > timeout:
                     self._rotate_baud()
                     last_traffic = now
 
@@ -172,10 +199,12 @@ class SnifferEngine:
                     continue
 
                 data = self._serial.read(self._serial.in_waiting)
+                self._byte_count += len(data)
                 got_valid = self._process_data(data)
 
                 if got_valid:
                     last_traffic = now
+                    self._had_traffic = True
                     self._advance_baud_confidence()
                 elif not self._baud_locked and self._baud_confidence > 0:
                     self._baud_confidence = max(0, self._baud_confidence - 1)
@@ -213,6 +242,7 @@ class SnifferEngine:
 
         got_valid = False
         for pkt in packets:
+            self._frame_count += 1
             decoded = decoder.decode(pkt)
             proto = decoded.get("protocol", "UNKNOWN")
 
@@ -291,6 +321,7 @@ class SnifferEngine:
         self._proto_counts.clear()
         self._proto_locked = False
         self._locked_decoder = None
+        self._had_traffic = False
         for name in self._decoder_hits:
             self._decoder_hits[name] = 0
 
@@ -321,9 +352,12 @@ class SnifferEngine:
         self._baud_index = 0
         self._baud_confidence = 0
         self._baud_locked = False
+        self._had_traffic = False
         self._proto_locked = False
         self._locked_decoder = None
         self._proto_counts.clear()
+        self._byte_count = 0
+        self._frame_count = 0
         for name in self._decoder_hits:
             self._decoder_hits[name] = 0
         self._reset_buffers()
@@ -349,6 +383,33 @@ class SnifferEngine:
         if others:
             label += " +" + "+".join(others)
         self._emit_protocol(label)
+
+    # ── diagnostics ───────────────────────────────────────────────────
+
+    def _emit_stats_log(self) -> None:
+        """Emit a cumulative stats line: bytes in, frames out, CRC failures."""
+        crc_fails = sum(
+            getattr(d, "hdr_crc_failures", 0) for d in self._decoders
+        )
+        full_pre = sum(
+            getattr(d, "full_preambles", 0) for d in self._decoders
+        )
+        partial_pre = sum(
+            getattr(d, "partial_preambles", 0) for d in self._decoders
+        )
+        self._emit_log(
+            f"Stats · rx={self._byte_count} B · "
+            f"full-preambles={full_pre} · partial-preambles={partial_pre} · "
+            f"hdr-CRC fails={crc_fails} · frames={self._frame_count}",
+        )
+        for d in self._decoders:
+            for ft, da, sa, length, stored, computed in getattr(
+                d, "crc_failure_samples", []
+            ):
+                self._emit_log(
+                    f"  CRC-fail · FT={ft:02X} DA={da:02X} SA={sa:02X} "
+                    f"LEN={length} · stored={stored:02X} computed={computed:02X}",
+                )
 
     # ── callback helpers ──────────────────────────────────────────────
 

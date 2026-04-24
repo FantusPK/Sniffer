@@ -56,14 +56,21 @@ N2OPEN_COMMANDS: dict[int, str] = {
     0x13: "ALARM",           0x14: "ACK_ALARM",
     0x15: "READ_ALL_AI",     0x16: "READ_ALL_AO",
     0x17: "READ_ALL_DI",     0x18: "READ_ALL_DO",
+    # JCI extended commands observed on N2 trunks
+    0x3F: "STATUS_TIMER",   # countdown/sync timer from bus controller
+    0x42: "STATUS_REPORT",  # device status data (3 bytes)
+    0x43: "STATUS_COUNT",   # device status/count response
+    0x72: "WRITE_EXT",      # extended write from JACE (6-byte payload)
 }
 
 N2OPEN_POINT_TYPE: dict[int, str] = {
     0x01: "AI", 0x02: "AI", 0x03: "AO", 0x04: "AO",
     0x05: "DI", 0x06: "DI", 0x07: "DO", 0x08: "DO",
     0x09: "AO", 0x0A: "DO", 0x0B: "AO", 0x0C: "DO",
-    0x0D: "AO", 0x0E: "DO", 0x15: "AI", 0x16: "AO",
-    0x17: "DI", 0x18: "DO",
+    0x0D: "AO", 0x0E: "DO", 0x0F: "SP", 0x10: "SP",
+    0x11: "SEQ", 0x12: "SEQ", 0x13: "ALM", 0x14: "SEQ",
+    0x15: "AI",  0x16: "AO",  0x17: "DI", 0x18: "DO",
+    0x3F: "TMR", 0x42: "DATA", 0x43: "DATA", 0x72: "DATA",
 }
 
 _MIN_BINARY_LEN = 5
@@ -263,7 +270,9 @@ def _decode_n2open_command(pkt: bytearray) -> dict[str, Any]:
             return ProtocolDecoder._unknown(content, "N2Open cmd too short")
         addr = int(content[0:2], 16)
         cmd = int(content[2:4], 16)
-        cmd_name, pt, pidx, val = _n2open_fields(cmd, content[4:])
+        # LRC is 2 hex chars (low byte of ASCII sum); data occupies the middle
+        data_str = content[4:-2] if len(content) >= 8 else ""
+        cmd_name, pt, pidx, val = _n2open_fields(cmd, data_str)
         return {
             "protocol": "N2Open-CMD",
             "src": "JACE",
@@ -287,8 +296,25 @@ def _decode_n2open_response(pkt: bytearray) -> dict[str, Any]:
         if len(content) < 4:
             return ProtocolDecoder._unknown(content, "N2Open resp too short")
         addr = int(content[0:2], 16)
+
+        # 4-char frame = addr(2) + LRC(2), no command byte — bare device ACK
+        if len(content) == 4:
+            return {
+                "protocol": "N2Open-RESP",
+                "src": addr,
+                "dst": "JACE",
+                "cmd": "ACK",
+                "point_type": "—",
+                "point_index": "—",
+                "value": "—",
+                "raw_hex": ProtocolDecoder._to_hex(pkt),
+                "raw_ascii": content,
+            }
+
         cmd = int(content[2:4], 16)
-        cmd_name, pt, pidx, val = _n2open_fields(cmd, content[4:])
+        # LRC is 2 hex chars (low byte of ASCII sum); data occupies the middle
+        data_str = content[4:-2] if len(content) >= 8 else ""
+        cmd_name, pt, pidx, val = _n2open_fields(cmd, data_str)
         return {
             "protocol": "N2Open-RESP",
             "src": addr,
@@ -324,15 +350,41 @@ def _parse_n2open_data(
         db = bytes.fromhex(data_str)
     except ValueError:
         return "\u2014", data_str
-    pidx: int | str = db[0] if db else "\u2014"
+    if not db:
+        return "\u2014", "\u2014"
+    pidx: int | str = db[0]
+
+    # POLL / POLL_RESP / ACK_ALARM: [seq_num, alarm_count]
+    if cmd in (0x11, 0x12, 0x14):
+        if len(db) >= 2:
+            return db[0], f"{db[1]} alarms"
+        return db[0], "\u2014"
+
+    # ALARM notification: [alarm_num, pending_count]
+    if cmd == 0x13:
+        if len(db) >= 2:
+            return db[0], f"{db[1]} pending"
+        return db[0], "\u2014"
+
+    # STATUS_TIMER: byte[0] is a countdown in seconds
+    if cmd == 0x3F:
+        return "\u2014", f"{db[0]}s"
+
+    # STATUS_REPORT / STATUS_COUNT / WRITE_EXT: show raw bytes
+    if cmd in (0x42, 0x43, 0x72):
+        return "\u2014", " ".join(f"{b:02X}" for b in db)
+
+    # Standard AI/AO read responses
     if cmd in (0x02, 0x04, 0x10):
         if len(db) >= 3:
             return pidx, f"{((db[1] << 8) | db[2]) / 10.0:.1f}"
         if len(db) >= 2:
             return pidx, str(db[1])
+
     elif cmd in (0x06, 0x08):
         if len(db) >= 2:
             return pidx, "ON" if db[1] else "OFF"
+
     elif cmd in (0x15, 0x16, 0x17, 0x18):
         vals: list[str] = []
         step = 3 if cmd in (0x15, 0x16) else 2
@@ -344,6 +396,7 @@ def _parse_n2open_data(
             elif cmd in (0x17, 0x18) and j + 1 < len(db):
                 vals.append(f"{db[j]}={'ON' if db[j + 1] else 'OFF'}")
         return "ALL", " | ".join(vals) if vals else "\u2014"
+
     return pidx, ProtocolDecoder._to_hex(db[1:]) or "\u2014"
 
 

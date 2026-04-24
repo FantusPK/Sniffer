@@ -43,6 +43,28 @@ def export_csv(
     return all_path, target_path
 
 
+PRESENCE_HEADERS = [
+    "Status",
+    "Addr",
+    "Addr Hex",
+    "Name",
+    "Protocol",
+    "Last Seen",
+    "Packets",
+]
+
+
+def export_presence_csv(save_dir: str, rows: list[list]) -> str:
+    """Write a device-presence snapshot CSV.  Returns the file path."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(save_dir, f"sniffer_presence_{ts}.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(PRESENCE_HEADERS)
+        writer.writerows(rows)
+    return path
+
+
 def _write(path: str, rows: list[list]) -> None:
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)

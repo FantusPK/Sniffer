@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import tkinter as tk
+import xml.etree.ElementTree as ET
 from datetime import datetime
+from tkinter import filedialog, messagebox
 from typing import Any
 
 import serial.tools.list_ports
 
 from sniffer.core.engine import EngineCallbacks, SnifferEngine
-from sniffer.core.exporter import export_csv
+from sniffer.core.exporter import export_csv, export_presence_csv
 from sniffer.gui.main_window import MainWindow
-from sniffer.protocols import get_decoders
+from sniffer.protocols import get_decoders, get_decoders_for
 from sniffer.sim.serial_sim import SimulatedSerial
 from sniffer.sim.traffic import make_generator
 
@@ -51,13 +54,15 @@ class SnifferApp:
         self.current_baud = tk.StringVar(value="9600")
         self.status_text = tk.StringVar(value="Idle")
         self.sim_protocol = tk.StringVar(value="BACnet-MSTP")
+        self.selected_protocol = tk.StringVar(value="Auto-detect")
+        self.selected_baud = tk.StringVar(value="Auto-detect")
 
         self.target_address: int = 1
         self._rows_lock = threading.Lock()
         self.all_log_rows: list[list] = []
         self.target_log_rows: list[list] = []
 
-        # ── engine ────────────────────────────────────────────────────
+        # engine is created fresh on each launch with the selected decoder(s)
         self.engine = SnifferEngine(get_decoders())
 
         # ── GUI ───────────────────────────────────────────────────────
@@ -74,16 +79,56 @@ class SnifferApp:
             baud_var=self.current_baud,
             status_var=self.status_text,
             sim_protocol_var=self.sim_protocol,
+            selected_protocol_var=self.selected_protocol,
+            selected_baud_var=self.selected_baud,
             on_refresh_ports=self._refresh_ports,
             on_start=self._start,
             on_stop=self._stop,
             on_simulate=self._simulate,
             on_export=self._export,
             on_clear=self._clear,
+            on_import_roster=self._import_roster,
+            on_export_presence=self._export_presence,
         )
 
         self._refresh_ports()
         self.window.config.force_display("1", _default_log_dir())
+
+    # ── roster import ─────────────────────────────────────────────────
+
+    def _import_roster(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Import Device Roster",
+            filetypes=[("oBIX / XML files", "*.obix *.xml"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            devices = _parse_obix(path)
+        except Exception as exc:
+            messagebox.showerror("Import failed", str(exc))
+            return
+        self.window.logs.import_roster(devices)
+        self._log_all(
+            f"[{self._ts()}] ── Roster imported: "
+            f"{len(devices)} devices from {os.path.basename(path)} ──",
+        )
+
+    def _export_presence(self) -> None:
+        save_dir = self.save_dir.get().strip()
+        if not save_dir or not os.path.isdir(save_dir):
+            self._log_all(
+                f"[{self._ts()}] !! Please select a valid save directory.",
+            )
+            return
+        rows = self.window.logs.get_presence_rows()
+        if not rows:
+            self._log_all(f"[{self._ts()}] !! No presence data to export.")
+            return
+        path = export_presence_csv(save_dir, rows)
+        self._log_all(
+            f"[{self._ts()}] ── Presence exported: {len(rows)} devices → {path} ──",
+        )
 
     # ── port helpers ──────────────────────────────────────────────────
 
@@ -147,7 +192,11 @@ class SnifferApp:
         self.target_address = int(addr_str)
         self.status_text.set("LIVE")
         self.protocol_detected.set("detecting\u2026")
+        self.window.logs.set_paused(False)
         self.window.controls.set_sniffing(True)
+
+        # recreate engine with only the selected protocol's decoder(s)
+        self.engine = SnifferEngine(get_decoders_for(self.selected_protocol.get()))
 
         callbacks = EngineCallbacks(
             on_packet=lambda d, r: self.root.after(
@@ -166,8 +215,15 @@ class SnifferApp:
             ),
         )
 
+        baud_sel = self.selected_baud.get()
+        forced_baud = int(baud_sel) if baud_sel != "Auto-detect" else None
+
         try:
-            self.engine.start(port, callbacks, serial_override=sim_serial)
+            self.engine.start(
+                port, callbacks,
+                serial_override=sim_serial,
+                forced_baud=forced_baud,
+            )
         except Exception:
             self.status_text.set("ERROR")
             self.window.controls.set_sniffing(False)
@@ -185,6 +241,7 @@ class SnifferApp:
 
     def _stop(self) -> None:
         self.engine.stop()
+        self.window.logs.set_paused(True)
         self.window.controls.set_sniffing(False)
         self._log_all(f"[{self._ts()}] \u2500\u2500 Sniffer stopped \u2500\u2500")
         self._log_target(f"[{self._ts()}] \u2500\u2500 Sniffer stopped \u2500\u2500")
@@ -214,17 +271,24 @@ class SnifferApp:
         self.packet_count_all.set(self.packet_count_all.get() + 1)
 
         # format display line
+        raw_hex = decoded.get("raw_hex", "")
         if proto == "UNKNOWN":
             line = f"[{ts}] {proto:<12} RAW: {raw_ascii}"
         else:
+            hex_suffix = f"  [{raw_hex}]" if raw_hex else ""
             line = (
                 f"[{ts}] {proto:<12} "
                 f"SRC:{str(src):>3} \u2192 DST:{str(dst):>3} "
                 f"| {cmd:<18} | {ptype:<4} "
                 f"IDX:{str(pidx):<4} VAL:{str(val):<12}"
+                f"{hex_suffix}"
             )
 
         self._log_all(line)
+
+        # device presence tracking
+        if proto != "UNKNOWN" and str(src) not in ("JACE", "?"):
+            self.window.logs.update_device(str(src), proto)
 
         # target device filtering
         if src == self.target_address or dst == self.target_address:
@@ -264,6 +328,7 @@ class SnifferApp:
 
     def _clear(self) -> None:
         self.window.logs.clear()
+        self.window.logs.clear_presence()
         with self._rows_lock:
             self.all_log_rows.clear()
             self.target_log_rows.clear()
@@ -285,6 +350,44 @@ class SnifferApp:
     def run(self) -> None:
         """Enter the Tk main loop."""
         self.root.mainloop()
+
+
+def _parse_obix(path: str) -> list[tuple[str, str]]:
+    """Parse an oBIX/XML device roster and return (addr, name) pairs.
+
+    Supports Niagara JciN2ODevice / JciN2BDevice exports where each <ref>
+    carries a ``display`` attribute containing ``addr:<n>`` and an optional
+    ``displayName`` attribute for the human-readable label.
+    """
+    tree = ET.parse(path)
+    root = tree.getroot()
+
+    # strip namespace prefix so tag matching works regardless of xmlns
+    ns_strip = re.compile(r"^\{[^}]*\}")
+
+    devices: list[tuple[str, str]] = []
+    for elem in root.iter():
+        if ns_strip.sub("", elem.tag) != "ref":
+            continue
+        display = elem.get("display", "")
+        m = re.search(r"\baddr:(\d+)", display)
+        if not m:
+            continue
+        addr = m.group(1)
+
+        # prefer displayName; fall back to name with $XX → char decoding
+        name = elem.get("displayName", "")
+        if not name:
+            raw_name = elem.get("name", "")
+            name = re.sub(
+                r"\$([0-9a-fA-F]{2})",
+                lambda x: chr(int(x.group(1), 16)),
+                raw_name,
+            )
+
+        devices.append((addr, name))
+
+    return devices
 
 
 def main() -> None:

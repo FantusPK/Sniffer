@@ -35,6 +35,8 @@ class MainWindow:
         baud_var: tk.StringVar,
         status_var: tk.StringVar,
         sim_protocol_var: tk.StringVar,
+        selected_protocol_var: tk.StringVar,
+        selected_baud_var: tk.StringVar,
         # callbacks
         on_refresh_ports: Callable[[], None],
         on_start: Callable[[], None],
@@ -42,6 +44,8 @@ class MainWindow:
         on_simulate: Callable[[], None],
         on_export: Callable[[], None],
         on_clear: Callable[[], None],
+        on_import_roster: Callable[[], None] | None = None,
+        on_export_presence: Callable[[], None] | None = None,
     ) -> None:
         root.title(app_title)
         root.geometry("1000x700")
@@ -67,6 +71,8 @@ class MainWindow:
             port_var=port_var,
             addr_var=addr_var,
             dir_var=dir_var,
+            selected_protocol_var=selected_protocol_var,
+            selected_baud_var=selected_baud_var,
             on_refresh=on_refresh_ports,
         )
         self.config.pack(fill="x", padx=16, pady=(0, 8))
@@ -95,7 +101,11 @@ class MainWindow:
         self.stats.pack(fill="x", padx=16, pady=(0, 8))
 
         # ── log view ─────────────────────────────────────────────────
-        self.logs = LogView(root)
+        self.logs = LogView(
+            root,
+            on_import=on_import_roster,
+            on_export_presence=on_export_presence,
+        )
         self.logs.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
         # ── footer ────────────────────────────────────────────────────

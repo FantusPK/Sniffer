@@ -131,6 +131,18 @@ _MSTP_HEADER_LEN = 8  # preamble(2) + FT(1) + DA(1) + SA(1) + LEN(2) + CRC(1)
 class BACnetMSTPDecoder(ProtocolDecoder):
     """BACnet MS/TP RS-485 decoder."""
 
+    def __init__(self) -> None:
+        self.hdr_crc_failures = 0
+        self.full_preambles = 0    # 0x55 0xFF seen intact
+        self.partial_preambles = 0  # standalone 0xFF (0x55 was missing)
+        self.crc_failure_samples: list[tuple[int, int, int, int, int, int]] = []
+
+    def reset(self) -> None:
+        self.hdr_crc_failures = 0
+        self.full_preambles = 0
+        self.partial_preambles = 0
+        self.crc_failure_samples.clear()
+
     @property
     def name(self) -> str:
         return "BACnet-MSTP"
@@ -163,6 +175,11 @@ class BACnetMSTPDecoder(ProtocolDecoder):
                 i += 1
                 continue
 
+            if has_full:
+                self.full_preambles += 1
+            else:
+                self.partial_preambles += 1
+
             hdr_start = i + 2 if has_full else i + 1
 
             if hdr_start + 6 > len(buffer):
@@ -182,6 +199,12 @@ class BACnetMSTPDecoder(ProtocolDecoder):
             # validate header CRC-8
             hdr_bytes = bytes(buffer[hdr_start : hdr_start + 5])
             if not _check_crc8(hdr_bytes, crc_hdr):
+                self.hdr_crc_failures += 1
+                if has_full and len(self.crc_failure_samples) < 5:
+                    computed = _compute_crc8(hdr_bytes)
+                    sample = (ft, da, sa, length, crc_hdr, computed)
+                    if sample not in self.crc_failure_samples:
+                        self.crc_failure_samples.append(sample)
                 i += 1
                 continue
 
@@ -592,8 +615,8 @@ def _decode_application_value(
 #  CRC helpers
 # ══════════════════════════════════════════════════════════════════════
 
-def _check_crc8(data: bytes, expected: int) -> bool:
-    """MS/TP header CRC-8."""
+def _compute_crc8(data: bytes) -> int:
+    """Return the MS/TP CRC-8 value for *data* (same algorithm as _check_crc8)."""
     crc = 0xFF
     for b in data:
         byte_val = b
@@ -603,7 +626,12 @@ def _check_crc8(data: bytes, expected: int) -> bool:
             else:
                 crc >>= 1
             byte_val >>= 1
-    return (~crc & 0xFF) == expected
+    return ~crc & 0xFF
+
+
+def _check_crc8(data: bytes, expected: int) -> bool:
+    """MS/TP header CRC-8."""
+    return _compute_crc8(data) == expected
 
 
 def _check_crc16(
