@@ -148,15 +148,20 @@ class SnifferEngine:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-        self._emit_baud(str(self._baud_rates[0]))
-
-        if serial_override is not None:
+        if getattr(self._serial, "skip_baud_rotation", False):
+            self._baud_locked = True
+            self._emit_baud("N/A")
+            self._emit_log(f"Sniffer started · BACnet/IP UDP · {port}")
+        elif serial_override is not None:
+            self._emit_baud(str(self._baud_rates[0]))
             self._emit_log("Sniffer started · SIMULATION MODE · RTS/DTR suppressed")
         elif forced_baud is not None:
+            self._emit_baud(str(self._baud_rates[0]))
             self._emit_log(
                 f"Sniffer started on {port} · Baud fixed at {forced_baud} · RTS/DTR suppressed",
             )
         else:
+            self._emit_baud(str(self._baud_rates[0]))
             rates_str = ", ".join(str(b) for b in self._baud_rates)
             self._emit_log(
                 f"Sniffer started on {port} · Auto-baud ON · RTS/DTR suppressed",
@@ -305,6 +310,8 @@ class SnifferEngine:
         return rates or [9600]
 
     def _rotate_baud(self) -> None:
+        if getattr(self._serial, "skip_baud_rotation", False):
+            return
         self._baud_confidence = 0
         self._baud_index = (self._baud_index + 1) % len(self._baud_rates)
         new_baud = self._baud_rates[self._baud_index]

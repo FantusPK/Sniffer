@@ -37,15 +37,23 @@ class MainWindow:
         sim_protocol_var: tk.StringVar,
         selected_protocol_var: tk.StringVar,
         selected_baud_var: tk.StringVar,
+        source_type_var: tk.StringVar,
+        udp_host_var: tk.StringVar,
+        udp_port_var: tk.StringVar,
+        who_is_var: tk.BooleanVar,
+        jace_ip_var: tk.StringVar,
         # callbacks
         on_refresh_ports: Callable[[], None],
+        on_refresh_ifaces: Callable[[], None],
         on_start: Callable[[], None],
         on_stop: Callable[[], None],
         on_simulate: Callable[[], None],
         on_export: Callable[[], None],
         on_clear: Callable[[], None],
+        on_query: Callable[[], None] | None = None,
         on_import_roster: Callable[[], None] | None = None,
         on_export_presence: Callable[[], None] | None = None,
+        on_rebuild: Callable[[], None] | None = None,
     ) -> None:
         root.title(app_title)
         root.geometry("1000x700")
@@ -73,7 +81,13 @@ class MainWindow:
             dir_var=dir_var,
             selected_protocol_var=selected_protocol_var,
             selected_baud_var=selected_baud_var,
+            source_type_var=source_type_var,
+            udp_host_var=udp_host_var,
+            udp_port_var=udp_port_var,
+            who_is_var=who_is_var,
+            jace_ip_var=jace_ip_var,
             on_refresh=on_refresh_ports,
+            on_refresh_ifaces=on_refresh_ifaces,
         )
         self.config.pack(fill="x", padx=16, pady=(0, 8))
 
@@ -85,6 +99,8 @@ class MainWindow:
             on_simulate=on_simulate,
             on_export=on_export,
             on_clear=on_clear,
+            on_rebuild=on_rebuild or (lambda: None),
+            on_query=on_query or (lambda: None),
             sim_protocol_var=sim_protocol_var,
         )
         self.controls.pack(fill="x", padx=16, pady=(0, 8))

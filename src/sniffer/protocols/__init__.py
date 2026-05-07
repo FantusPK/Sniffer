@@ -43,3 +43,4 @@ def get_decoders_for(selection: str) -> list[ProtocolDecoder]:
 # Importing the modules triggers their @register decorators.
 from . import bacnet_mstp as _bac  # noqa: E402, F401
 from . import n2 as _n2  # noqa: E402, F401
+from . import bacnet_ip as _bip  # noqa: E402, F401

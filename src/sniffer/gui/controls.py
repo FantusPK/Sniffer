@@ -23,6 +23,8 @@ class ControlBar(tk.Frame):
         on_simulate: Callable[[], None],
         on_export: Callable[[], None],
         on_clear: Callable[[], None],
+        on_rebuild: Callable[[], None],
+        on_query: Callable[[], None],
         sim_protocol_var: tk.StringVar,
     ) -> None:
         super().__init__(parent, bg=theme.BG)
@@ -55,6 +57,22 @@ class ControlBar(tk.Frame):
             command=on_stop,
         )
         self.stop_btn.pack(side="left", padx=(0, 8))
+
+        self.query_btn = tk.Button(
+            self,
+            text="☉  QUERY DEVICE",
+            bg="#1e3a1e",
+            fg="#80ff80",
+            activebackground="#2a4a2a",
+            activeforeground="#b0ffb0",
+            bd=0,
+            font=theme.FONT_BTN,
+            padx=16,
+            pady=8,
+            cursor="hand2",
+            command=on_query,
+        )
+        self.query_btn.pack(side="left", padx=(0, 8))
 
         # ── separator ─────────────────────────────────────────────────
         tk.Frame(self, bg=theme.BORDER, width=1, height=36).pack(
@@ -126,9 +144,40 @@ class ControlBar(tk.Frame):
             command=on_clear,
         ).pack(side="left")
 
+        # ── separator ─────────────────────────────────────────────────
+        tk.Frame(self, bg=theme.BORDER, width=1, height=36).pack(
+            side="left", padx=8, pady=4,
+        )
+
+        # ── rebuild button ────────────────────────────────────────────
+        self.rebuild_btn = tk.Button(
+            self,
+            text="⟳  REBUILD",
+            bg=theme.PANEL,
+            fg=theme.MUTED,
+            activebackground=theme.BORDER,
+            activeforeground=theme.TEXT,
+            bd=0,
+            font=theme.FONT_BTN_SM,
+            padx=14,
+            pady=8,
+            cursor="hand2",
+            command=on_rebuild,
+        )
+        self.rebuild_btn.pack(side="left")
+
     def set_sniffing(self, active: bool) -> None:
         """Toggle button enabled states for sniffing / idle."""
         self.start_btn.configure(state="disabled" if active else "normal")
         self.stop_btn.configure(state="normal" if active else "disabled")
         self.sim_btn.configure(state="disabled" if active else "normal")
         self.sim_proto_combo.configure(state="disabled" if active else "readonly")
+        if active:
+            self.query_btn.configure(state="disabled")
+
+    def set_querying(self, active: bool) -> None:
+        """Toggle query button state while a query is in progress."""
+        self.query_btn.configure(
+            state="disabled" if active else "normal",
+            text="⏳  QUERYING…" if active else "☉  QUERY DEVICE",
+        )

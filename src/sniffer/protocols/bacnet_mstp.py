@@ -296,6 +296,10 @@ def _decode_npdu_apdu(data: bytes) -> dict[str, Any]:
         slen = data[offset - 1]
         offset += slen
 
+    # hop count is present whenever destination specifier is set (ASHRAE 135 §6.2.2)
+    if npdu_control & 0x20:
+        offset += 1
+
     if npdu_control & 0x01:
         return {"cmd": "NPDU-Network-Msg"}
 
