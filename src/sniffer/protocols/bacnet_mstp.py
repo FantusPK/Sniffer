@@ -327,6 +327,8 @@ def _decode_apdu(apdu: bytes) -> dict[str, Any]:
             result.update(_decode_who_is(apdu[2:]))
         elif svc == 0x00:
             result.update(_decode_i_am(apdu[2:]))
+        elif svc == 0x07:
+            result.update(_decode_who_has(apdu[2:]))
         elif svc in (0x02, 0x03):
             result.update(_decode_cov_notification(apdu[2:]))
         return result
@@ -382,15 +384,72 @@ def _decode_apdu(apdu: bytes) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════
 
 def _decode_who_is(data: bytes) -> dict[str, Any]:
-    if len(data) < 4:
+    if len(data) < 2:
         return {"point_type": "DISC", "value": "Who-Is (broadcast)"}
     try:
-        lo = _decode_unsigned(data[1 : data[0] + 1 + 1])
-        hi_start = data[0] + 1 + 1
-        hi = _decode_unsigned(data[hi_start + 1 :])
+        lo_len = data[0] & 0x07
+        lo = _decode_unsigned(data[1:1 + lo_len])
+        hi_off = 1 + lo_len
+        hi_len = data[hi_off] & 0x07
+        hi = _decode_unsigned(data[hi_off + 1:hi_off + 1 + hi_len])
         return {"point_type": "DISC", "value": f"Who-Is range {lo}\u2013{hi}"}
     except Exception:
-        return {"point_type": "DISC", "value": "Who-Is"}
+        return {"point_type": "DISC", "value": "Who-Is (broadcast)"}
+
+
+def _decode_who_has(data: bytes) -> dict[str, Any]:
+    """Decode Who-Has APDU: extract object-name [3] or object-identifier [2]."""
+    try:
+        i = 0
+        # skip optional low-limit [0] and high-limit [1]
+        while i < len(data):
+            tag = data[i]
+            tag_num = (tag >> 4) & 0x0F
+            is_ctx = (tag >> 3) & 0x01
+            lvt = tag & 0x07
+            if is_ctx and tag_num in (0, 1):
+                i += 1
+                length = data[i] if lvt == 5 else lvt
+                i += (1 if lvt == 5 else 0) + length
+            else:
+                break
+
+        if i >= len(data):
+            return {"point_type": "DISC", "value": "Who-Has"}
+
+        tag = data[i]
+        tag_num = (tag >> 4) & 0x0F
+        is_ctx = (tag >> 3) & 0x01
+        lvt = tag & 0x07
+        i += 1
+        if lvt == 5:  # extended length
+            length = data[i]
+            i += 1
+        else:
+            length = lvt
+
+        if is_ctx and tag_num == 2 and length == 4:
+            raw = data[i] << 24 | data[i+1] << 16 | data[i+2] << 8 | data[i+3]
+            obj_type = (raw >> 22) & 0x3FF
+            obj_inst = raw & 0x3FFFFF
+            label = OBJECT_TYPES.get(obj_type, f"OBJ_{obj_type}")
+            return {"point_type": "DISC", "value": f"Who-Has {label}:{obj_inst}"}
+
+        if is_ctx and tag_num == 3 and length > 1:
+            encoding = data[i]
+            name_bytes = bytes(data[i + 1:i + length])
+            if encoding == 0:
+                name = name_bytes.decode("utf-8", errors="replace")
+            elif encoding in (3, 4):
+                # JCI uses encoding=4 for UTF-16 big-endian (UCS-2)
+                name = name_bytes.decode("utf-16-be", errors="replace")
+            else:
+                name = name_bytes.decode("latin-1", errors="replace")
+            return {"point_type": "DISC", "value": f"Who-Has {name!r}"}
+
+        return {"point_type": "DISC", "value": "Who-Has"}
+    except Exception:
+        return {"point_type": "DISC", "value": "Who-Has"}
 
 
 def _decode_i_am(data: bytes) -> dict[str, Any]:
