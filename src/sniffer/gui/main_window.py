@@ -42,6 +42,9 @@ class MainWindow:
         udp_port_var: tk.StringVar,
         who_is_var: tk.BooleanVar,
         jace_ip_var: tk.StringVar,
+        bridge_enabled_var: tk.BooleanVar,
+        bridge_port_var: tk.StringVar,
+        bridge_status_var: tk.StringVar,
         # callbacks
         on_refresh_ports: Callable[[], None],
         on_refresh_ifaces: Callable[[], None],
@@ -86,6 +89,9 @@ class MainWindow:
             udp_port_var=udp_port_var,
             who_is_var=who_is_var,
             jace_ip_var=jace_ip_var,
+            bridge_enabled_var=bridge_enabled_var,
+            bridge_port_var=bridge_port_var,
+            bridge_status_var=bridge_status_var,
             on_refresh=on_refresh_ports,
             on_refresh_ifaces=on_refresh_ifaces,
         )

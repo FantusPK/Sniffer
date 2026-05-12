@@ -31,6 +31,9 @@ class ConfigPanel(tk.Frame):
         udp_port_var: tk.StringVar,
         who_is_var: tk.BooleanVar,
         jace_ip_var: tk.StringVar,
+        bridge_enabled_var: tk.BooleanVar,
+        bridge_port_var: tk.StringVar,
+        bridge_status_var: tk.StringVar,
         on_refresh: Callable[[], None],
         on_refresh_ifaces: Callable[[], None],
     ) -> None:
@@ -52,6 +55,9 @@ class ConfigPanel(tk.Frame):
         self._udp_port_var = udp_port_var
         self._who_is_var = who_is_var
         self._jace_ip_var = jace_ip_var
+        self._bridge_enabled_var = bridge_enabled_var
+        self._bridge_port_var = bridge_port_var
+        self._bridge_status_var = bridge_status_var
 
         # ── row 0: source type selector ───────────────────────────────
         row0 = tk.Frame(self, bg=theme.PANEL)
@@ -187,9 +193,54 @@ class ConfigPanel(tk.Frame):
             command=self._browse,
         ).grid(row=1, column=1, padx=(8, 0))
 
+        # ── row 3: Niagara oBIX bridge ────────────────────────────────
+        row3 = tk.Frame(self, bg=theme.PANEL)
+        row3.pack(fill="x", pady=(8, 0))
+
+        tk.Label(
+            row3, text="NIAGARA OBIX BRIDGE", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=0, sticky="w")
+
+        tk.Checkbutton(
+            row3, text="Enable",
+            variable=self._bridge_enabled_var,
+            bg=theme.PANEL, fg=theme.TEXT, selectcolor=theme.INPUT_BG,
+            activebackground=theme.PANEL, font=theme.FONT_MONO_XS,
+        ).grid(row=1, column=0, sticky="w")
+
+        tk.Label(
+            row3, text="PORT", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=1, sticky="w", padx=(16, 0))
+
+        self.bridge_port_entry = ttk.Entry(
+            row3, textvariable=self._bridge_port_var, width=7,
+        )
+        self.bridge_port_entry.grid(row=1, column=1, sticky="w", padx=(16, 0))
+
+        tk.Label(
+            row3, text="STATUS", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=2, sticky="w", padx=(16, 0))
+
+        tk.Label(
+            row3, textvariable=self._bridge_status_var,
+            bg=theme.PANEL, fg=theme.ACCENT, font=theme.FONT_MONO_XS,
+        ).grid(row=1, column=2, sticky="w", padx=(16, 0))
+
+        # disable port entry while bridge is running
+        self._bridge_enabled_var.trace_add("write", self._on_bridge_toggle)
+
         # wire up source-type toggle
         self._source_type_var.trace_add("write", self._on_source_change)
         self._on_source_change()  # apply initial state
+
+    # ── bridge toggle ─────────────────────────────────────────────────
+
+    def _on_bridge_toggle(self, *_: object) -> None:
+        state = "disabled" if self._bridge_enabled_var.get() else "normal"
+        self.bridge_port_entry.configure(state=state)
 
     # ── source type toggle ────────────────────────────────────────────
 

@@ -19,6 +19,7 @@ from sniffer.core.bacnet_client import BACnetClient
 from sniffer.core.engine import EngineCallbacks, SnifferEngine
 from sniffer.core.exporter import export_csv, export_presence_csv
 from sniffer.core.npcap_source import NpcapSource, list_interfaces
+from sniffer.core.obix_server import ObixBridgeServer
 from sniffer.gui.main_window import MainWindow
 from sniffer.protocols import get_decoders, get_decoders_for
 from sniffer.sim.serial_sim import SimulatedSerial
@@ -76,12 +77,18 @@ class SnifferApp:
         self.who_is_on_connect = tk.BooleanVar(value=True)
         self.jace_ip = tk.StringVar(value="192.168.142.1")
 
+        self.bridge_enabled = tk.BooleanVar(value=False)
+        self.bridge_port = tk.StringVar(value="8080")
+        self.bridge_status = tk.StringVar(value="Stopped")
+
         self.target_address: int = 1
         self._rows_lock = threading.Lock()
         self.all_log_rows: list[list] = []
         self.target_log_rows: list[list] = []
         self._iface_map: dict[str, tuple[Any, str]] = {}  # label → (iface, ip)
         self._query_client: BACnetClient | None = None
+        self._bridge = ObixBridgeServer()
+        self.bridge_enabled.trace_add("write", self._toggle_bridge)
 
         # engine is created fresh on each launch with the selected decoder(s)
         self.engine = SnifferEngine(get_decoders())
@@ -107,6 +114,9 @@ class SnifferApp:
             udp_port_var=self.udp_port,
             who_is_var=self.who_is_on_connect,
             jace_ip_var=self.jace_ip,
+            bridge_enabled_var=self.bridge_enabled,
+            bridge_port_var=self.bridge_port,
+            bridge_status_var=self.bridge_status,
             on_refresh_ports=self._refresh_ports,
             on_refresh_ifaces=self._refresh_interfaces,
             on_start=self._start,
@@ -361,6 +371,7 @@ class SnifferApp:
         # device presence tracking
         if proto != "UNKNOWN" and str(src) not in ("JACE", "?"):
             self.window.logs.update_device(str(src), proto)
+            self._bridge.update_device(str(src), proto)
 
         if proto != "UNKNOWN" and str(src) == "JACE" and str(dst) not in ("JACE", "?", "—"):
             self.window.logs.update_device_rx(str(dst))
@@ -469,6 +480,23 @@ class SnifferApp:
         self._log_all(f"[{self._ts()}] ── Rebuilding — app will restart when complete ──")
         self.root.after(1000, self.root.destroy)
 
+    # ── oBIX bridge toggle ────────────────────────────────────────────
+
+    def _toggle_bridge(self, *_: object) -> None:
+        if self.bridge_enabled.get():
+            port_str = self.bridge_port.get().strip()
+            if not port_str.isdigit() or not (1 <= int(port_str) <= 65535):
+                self.bridge_status.set("!! Invalid port")
+                self.bridge_enabled.set(False)
+                return
+            ok, msg = self._bridge.start(int(port_str))
+            self.bridge_status.set(msg)
+            if not ok:
+                self.bridge_enabled.set(False)
+        else:
+            self._bridge.stop()
+            self.bridge_status.set("Stopped")
+
     # ── export / clear ────────────────────────────────────────────────
 
     def _export(self) -> None:
@@ -500,6 +528,7 @@ class SnifferApp:
         self.window.logs.clear()
         self.window.logs.clear_presence()
         self.window.logs.clear_comm()
+        self._bridge.clear()
         with self._rows_lock:
             self.all_log_rows.clear()
             self.target_log_rows.clear()
