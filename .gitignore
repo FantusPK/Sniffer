@@ -13,3 +13,13 @@ Logs/
 
 # VSCode
 .vscode/
+
+# Claude Code local settings (user-specific)
+.claude/
+
+# Backups and scratch exports
+backup_*/
+*.dist
+
+# Scratch image files
+*.png
