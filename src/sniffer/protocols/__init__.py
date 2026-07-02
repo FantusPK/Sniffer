@@ -44,4 +44,6 @@ def get_decoders_for(selection: str) -> list[ProtocolDecoder]:
 from . import bacnet_mstp as _bac  # noqa: E402, F401
 from . import n2 as _n2  # noqa: E402, F401
 from . import bacnet_ip as _bip  # noqa: E402, F401
-from . import ccn as _ccn  # noqa: E402, F401
+# CCN disabled for now — framing/CRC-lock pass needs tuning against a real
+# capture before it's trustworthy. Re-enable by uncommenting this import.
+# from . import ccn as _ccn  # noqa: E402, F401

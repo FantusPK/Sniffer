@@ -13,7 +13,7 @@ class ConfigPanel(tk.Frame):
     """Top configuration bar with source type, port/network, address, protocol, and save-directory pickers."""
 
     SOURCE_OPTIONS  = ["Serial (COM)", "Network (BACnet/IP)"]
-    PROTOCOL_OPTIONS_SERIAL  = ["Auto-detect", "BACnet-MSTP", "N2", "CCN"]
+    PROTOCOL_OPTIONS_SERIAL  = ["Auto-detect", "BACnet-MSTP", "N2"]
     PROTOCOL_OPTIONS_NETWORK = ["BACnet-IP"]
     BAUD_OPTIONS = ["Auto-detect", "9600", "19200", "38400", "57600", "76800", "115200"]
 
