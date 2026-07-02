@@ -13,7 +13,7 @@ class ConfigPanel(tk.Frame):
     """Top configuration bar with source type, port/network, address, protocol, and save-directory pickers."""
 
     SOURCE_OPTIONS  = ["Serial (COM)", "Network (BACnet/IP)"]
-    PROTOCOL_OPTIONS_SERIAL  = ["Auto-detect", "BACnet-MSTP", "N2"]
+    PROTOCOL_OPTIONS_SERIAL  = ["Auto-detect", "BACnet-MSTP", "N2", "CCN"]
     PROTOCOL_OPTIONS_NETWORK = ["BACnet-IP"]
     BAUD_OPTIONS = ["Auto-detect", "9600", "19200", "38400", "57600", "76800", "115200"]
 
@@ -31,6 +31,8 @@ class ConfigPanel(tk.Frame):
         udp_port_var: tk.StringVar,
         who_is_var: tk.BooleanVar,
         jace_ip_var: tk.StringVar,
+        scan_lo_var: tk.StringVar,
+        scan_hi_var: tk.StringVar,
         bridge_enabled_var: tk.BooleanVar,
         bridge_port_var: tk.StringVar,
         bridge_status_var: tk.StringVar,
@@ -55,6 +57,8 @@ class ConfigPanel(tk.Frame):
         self._udp_port_var = udp_port_var
         self._who_is_var = who_is_var
         self._jace_ip_var = jace_ip_var
+        self._scan_lo_var = scan_lo_var
+        self._scan_hi_var = scan_hi_var
         self._bridge_enabled_var = bridge_enabled_var
         self._bridge_port_var = bridge_port_var
         self._bridge_status_var = bridge_status_var
@@ -140,6 +144,25 @@ class ConfigPanel(tk.Frame):
             self._network_frame, textvariable=self._jace_ip_var, width=18,
         )
         self.jace_ip_entry.grid(row=1, column=4, sticky="w", padx=(16, 0))
+
+        # scan instance range (optional; empty = global Who-Is)
+        tk.Label(
+            self._network_frame, text="SCAN RANGE  MIN", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=5, sticky="w", padx=(16, 0))
+        self.scan_lo_entry = ttk.Entry(
+            self._network_frame, textvariable=self._scan_lo_var, width=8,
+        )
+        self.scan_lo_entry.grid(row=1, column=5, sticky="w", padx=(16, 0))
+
+        tk.Label(
+            self._network_frame, text="MAX", bg=theme.PANEL,
+            fg=theme.MUTED, font=theme.FONT_MONO_XS,
+        ).grid(row=0, column=6, sticky="w", padx=(4, 0))
+        self.scan_hi_entry = ttk.Entry(
+            self._network_frame, textvariable=self._scan_hi_var, width=8,
+        )
+        self.scan_hi_entry.grid(row=1, column=6, sticky="w", padx=(4, 0))
 
         # shared: device address
         tk.Label(

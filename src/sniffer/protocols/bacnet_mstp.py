@@ -28,6 +28,7 @@ import struct
 from typing import Any
 
 from . import register
+from .vendors import vendor_name as _vname
 from .base import ProtocolDecoder
 
 # ── MS/TP Frame Types ─────────────────────────────────────────────────
@@ -460,10 +461,30 @@ def _decode_i_am(data: bytes) -> dict[str, Any]:
         obj_type = (obj_raw >> 22) & 0x3FF
         instance = obj_raw & 0x3FFFFF
         obj_name = OBJECT_TYPES.get(obj_type, f"OBJ_{obj_type}")
+
+        # parse fields 2–4 to extract vendor ID
+        vid: int | None = None
+        try:
+            i = 5  # byte after object-identifier (tag + 4 data bytes)
+            for _ in range(2):  # skip max-apdu-length (field 2) and segmentation (field 3)
+                if i >= len(data):
+                    break
+                length = data[i] & 0x07
+                i += 1 + length
+            if i < len(data):  # field 4: vendor-id
+                length = data[i] & 0x07
+                i += 1
+                if i + length <= len(data):
+                    vid = int.from_bytes(data[i: i + length], "big")
+        except Exception:
+            vid = None
+
         return {
             "point_type": "DISC",
             "point_index": instance,
             "value": f"I-Am {obj_name}:{instance}",
+            "vendor_id": vid,
+            "vendor_name": _vname(vid) if vid is not None else None,
         }
     except Exception:
         return {"point_type": "DISC", "value": "I-Am"}

@@ -16,6 +16,7 @@ from typing import Any
 import serial.tools.list_ports
 
 from sniffer.core.bacnet_client import BACnetClient
+from sniffer.core.broadcast_scanner import BroadcastScanner
 from sniffer.core.engine import EngineCallbacks, SnifferEngine
 from sniffer.core.exporter import export_csv, export_presence_csv
 from sniffer.core.npcap_source import NpcapSource, list_interfaces
@@ -80,6 +81,8 @@ class SnifferApp:
         self.bridge_enabled = tk.BooleanVar(value=False)
         self.bridge_port = tk.StringVar(value="8080")
         self.bridge_status = tk.StringVar(value="Stopped")
+        self.scan_instance_lo = tk.StringVar(value="")
+        self.scan_instance_hi = tk.StringVar(value="")
 
         self.target_address: int = 1
         self._rows_lock = threading.Lock()
@@ -114,6 +117,8 @@ class SnifferApp:
             udp_port_var=self.udp_port,
             who_is_var=self.who_is_on_connect,
             jace_ip_var=self.jace_ip,
+            scan_lo_var=self.scan_instance_lo,
+            scan_hi_var=self.scan_instance_hi,
             bridge_enabled_var=self.bridge_enabled,
             bridge_port_var=self.bridge_port,
             bridge_status_var=self.bridge_status,
@@ -125,6 +130,8 @@ class SnifferApp:
             on_export=self._export,
             on_clear=self._clear,
             on_query=self._query,
+            on_scan=self._scan,
+            on_query_all=self._query_all,
             on_import_roster=self._import_roster,
             on_export_presence=self._export_presence,
             on_rebuild=self._rebuild,
@@ -379,6 +386,20 @@ class SnifferApp:
         if proto != "UNKNOWN":
             self.window.logs.update_comm(str(src), str(dst))
 
+        # I-Am: link MS/TP MAC / IP address to BACnet instance + vendor
+        if cmd == "I-Am" and str(src) not in ("?", "JACE"):
+            inst = decoded.get("point_index")
+            self.window.logs.update_device_meta(
+                str(src),
+                instance=inst if isinstance(inst, int) else None,
+                vendor_id=decoded.get("vendor_id"),
+                vendor_name=decoded.get("vendor_name") or "",
+            )
+
+        # TOKEN frames: mark the source MAC as an MS/TP token master
+        if cmd == "TOKEN" and proto == "BACnet-MSTP":
+            self.window.logs.increment_token_count(str(src))
+
         # target device filtering
         if src == self.target_address or dst == self.target_address:
             with self._rows_lock:
@@ -431,6 +452,106 @@ class SnifferApp:
             args=(on_log, on_result, on_done),
             daemon=True,
         ).start()
+
+    # ── broadcast network scan ────────────────────────────────────────
+
+    def _scan(self) -> None:
+        lo_str = self.scan_instance_lo.get().strip()
+        hi_str = self.scan_instance_hi.get().strip()
+        lo = int(lo_str) if lo_str.isdigit() else None
+        hi = int(hi_str) if hi_str.isdigit() else None
+
+        udp_port_str = self.udp_port.get().strip()
+        if not udp_port_str.isdigit() or not (1 <= int(udp_port_str) <= 65535):
+            self._log_all(f"[{self._ts()}] !! UDP port must be 1–65535.")
+            return
+        port = int(udp_port_str)
+
+        self.window.controls.set_scanning(True)
+        range_label = f"  range {lo}–{hi}" if lo is not None and hi is not None else ""
+        self._log_all(
+            f"[{self._ts()}] ── BACnet Broadcast Scan → 255.255.255.255:{port}{range_label} ──"
+        )
+
+        scanner = BroadcastScanner(port=port, timeout=3.0)
+
+        def on_result(src_ip: str, instance: int, vendor_id: int | None) -> None:
+            from sniffer.protocols.vendors import vendor_name as _vn
+            vn = _vn(vendor_id) if vendor_id is not None else ""
+            vendor_part = f"  vendor={vn}" if vn else ""
+
+            def _update() -> None:
+                self._log_all(
+                    f"[{self._ts()}]   I-Am  {src_ip:<18}  instance={instance}{vendor_part}"
+                )
+                self.window.logs.update_device(src_ip, "BACnet-IP")
+                self.window.logs.update_device_meta(
+                    src_ip,
+                    instance=instance,
+                    vendor_id=vendor_id,
+                    vendor_name=vn,
+                )
+            self.root.after(0, _update)
+
+        def on_done() -> None:
+            def _finish() -> None:
+                self._log_all(f"[{self._ts()}] ── Scan complete ──")
+                self.window.controls.set_scanning(False)
+            self.root.after(0, _finish)
+
+        threading.Thread(
+            target=scanner.scan,
+            args=(on_result, on_done, lo, hi),
+            daemon=True,
+        ).start()
+
+    # ── batch query all discovered BACnet/IP devices ──────────────────
+
+    def _query_all(self) -> None:
+        targets = [
+            addr
+            for addr, e in self.window.logs._presence.items()
+            if e.get("protocol", "").startswith("BACnet") and "." in addr
+        ]
+        if not targets:
+            self._log_all(
+                f"[{self._ts()}] !! No BACnet/IP devices in presence table. "
+                "Run SCAN NETWORK first."
+            )
+            return
+
+        udp_port_str = self.udp_port.get().strip()
+        port = int(udp_port_str) if udp_port_str.isdigit() else 47808
+
+        self.window.controls.set_scanning(True)
+        self._log_all(
+            f"[{self._ts()}] ── Query All: {len(targets)} BACnet/IP device(s) ──"
+        )
+
+        def _run_batch() -> None:
+            for ip in targets:
+                client = BACnetClient(ip, port)
+
+                def on_log(msg: str, _ip: str = ip) -> None:
+                    self.root.after(0, self._log_all, f"[{self._ts()}] [{_ip}] {msg}")
+
+                def on_result(label: str, name: str, value: str, _ip: str = ip) -> None:
+                    line = f"[{self._ts()}] [{_ip}]   {label:<10}  {name!r:<30}  = {value}"
+                    self.root.after(0, self._log_all, line)
+
+                def on_done(ok: bool, msg: str, _ip: str = ip) -> None:
+                    self.root.after(
+                        0, self._log_all, f"[{self._ts()}] [{_ip}] ── {msg} ──"
+                    )
+
+                client.full_query(on_log, on_result, on_done)
+
+            def _finish() -> None:
+                self._log_all(f"[{self._ts()}] ── Query All complete ──")
+                self.window.controls.set_scanning(False)
+            self.root.after(0, _finish)
+
+        threading.Thread(target=_run_batch, daemon=True).start()
 
     # ── rebuild ───────────────────────────────────────────────────────
 

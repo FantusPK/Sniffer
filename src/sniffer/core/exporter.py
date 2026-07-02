@@ -49,8 +49,14 @@ PRESENCE_HEADERS = [
     "Addr Hex",
     "Name",
     "Protocol",
+    "Instance",
+    "Vendor",
+    "Role",
     "Last Seen",
-    "Packets",
+    "TX",
+    "RX",
+    "In Roster",
+    "Health",
 ]
 
 

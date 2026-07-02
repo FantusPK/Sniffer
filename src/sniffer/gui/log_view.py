@@ -124,7 +124,11 @@ class LogView(ttk.Notebook):
         tree_frame = tk.Frame(parent, bg=theme.BG)
         tree_frame.pack(fill="both", expand=True)
 
-        cols = ("status", "addr", "name", "protocol", "last_seen", "tx", "rx", "health")
+        cols = (
+            "status", "addr", "name", "protocol",
+            "instance", "vendor", "role", "tokens",
+            "last_seen", "tx", "rx", "health",
+        )
         self._tree = ttk.Treeview(
             tree_frame, columns=cols, show="headings",
             style="Presence.Treeview",
@@ -134,6 +138,10 @@ class LogView(ttk.Notebook):
         self._tree.heading("addr",     text="ADDR")
         self._tree.heading("name",     text="NAME")
         self._tree.heading("protocol", text="PROTOCOL")
+        self._tree.heading("instance", text="INSTANCE")
+        self._tree.heading("vendor",   text="VENDOR")
+        self._tree.heading("role",     text="ROLE")
+        self._tree.heading("tokens",   text="TOKENS")
         self._tree.heading("last_seen",text="LAST TX")
         self._tree.heading("tx",       text="TX")
         self._tree.heading("rx",       text="RX")
@@ -142,7 +150,11 @@ class LogView(ttk.Notebook):
         self._tree.column("status",    width=18,  minwidth=18,  stretch=False, anchor="center")
         self._tree.column("addr",      width=110, anchor="w")
         self._tree.column("name",      width=180, anchor="w")
-        self._tree.column("protocol",  width=100, anchor="w")
+        self._tree.column("protocol",  width=80,  anchor="w")
+        self._tree.column("instance",  width=90,  anchor="e")
+        self._tree.column("vendor",    width=140, anchor="w")
+        self._tree.column("role",      width=70,  anchor="w")
+        self._tree.column("tokens",    width=60,  anchor="e")
         self._tree.column("last_seen", width=120, anchor="w")
         self._tree.column("tx",        width=55,  anchor="e")
         self._tree.column("rx",        width=55,  anchor="e")
@@ -195,15 +207,7 @@ class LogView(ttk.Notebook):
         """Record a live TX packet from *addr*.  Must be called on the main thread."""
         now = time.monotonic()
         if addr not in self._presence:
-            self._presence[addr] = {
-                "name": name,
-                "protocol": protocol,
-                "last_seen": now,
-                "count": 1,
-                "rx_count": 0,
-                "in_roster": False,
-                "iid": None,
-            }
+            self._presence[addr] = _new_entry(name=name, protocol=protocol, last_seen=now, count=1)
         else:
             e = self._presence[addr]
             e["last_seen"] = now
@@ -215,15 +219,7 @@ class LogView(ttk.Notebook):
     def update_device_rx(self, addr: str) -> None:
         """Record a JACE poll directed at *addr*.  Must be called on the main thread."""
         if addr not in self._presence:
-            self._presence[addr] = {
-                "name": "",
-                "protocol": "",
-                "last_seen": None,
-                "count": 0,
-                "rx_count": 1,
-                "in_roster": False,
-                "iid": None,
-            }
+            self._presence[addr] = _new_entry(rx_count=1)
         else:
             self._presence[addr]["rx_count"] = self._presence[addr].get("rx_count", 0) + 1
 
@@ -235,19 +231,36 @@ class LogView(ttk.Notebook):
         """
         for addr, name in devices:
             if addr not in self._presence:
-                self._presence[addr] = {
-                    "name": name,
-                    "protocol": "",
-                    "last_seen": None,
-                    "count": 0,
-                    "rx_count": 0,
-                    "in_roster": True,
-                    "iid": None,
-                }
+                self._presence[addr] = _new_entry(name=name, in_roster=True)
             else:
                 self._presence[addr]["in_roster"] = True
                 if name and not self._presence[addr]["name"]:
                     self._presence[addr]["name"] = name
+
+    def update_device_meta(self, addr: str, **kwargs: object) -> None:
+        """Update discovery metadata for *addr* without overwriting activity fields.
+
+        Accepted kwargs: ``instance``, ``vendor_id``, ``vendor_name``,
+        ``mstp_role``, ``token_count``.  Creates a stub entry if needed.
+        Must be called on the main thread.
+        """
+        if addr not in self._presence:
+            self._presence[addr] = _new_entry()
+        e = self._presence[addr]
+        for key in ("instance", "vendor_id", "vendor_name", "mstp_role", "token_count"):
+            if key in kwargs and kwargs[key] is not None:
+                e[key] = kwargs[key]
+
+    def increment_token_count(self, addr: str) -> None:
+        """Record a TOKEN frame from *addr*, marking it as an MS/TP master.
+
+        Must be called on the main thread.
+        """
+        if addr not in self._presence:
+            self._presence[addr] = _new_entry()
+        e = self._presence[addr]
+        e["token_count"] = e.get("token_count", 0) + 1
+        e["mstp_role"] = "Master"
 
     def get_presence_rows(self) -> list[list]:
         """Return current presence table as plain rows for CSV export.
@@ -295,6 +308,9 @@ class LogView(ttk.Notebook):
                 addr_hex,
                 e["name"],
                 _short_proto(e["protocol"]) if e["protocol"] else "",
+                e.get("instance") or "",
+                e.get("vendor_name") or "",
+                e.get("mstp_role") or "",
                 last,
                 tx,
                 rx,
@@ -381,11 +397,20 @@ class LogView(ttk.Notebook):
             except ValueError:
                 addr_disp = addr
 
+            instance = e.get("instance")
+            vendor   = e.get("vendor_name") or ""
+            role     = e.get("mstp_role") or ""
+            tokens   = e.get("token_count") or 0
+
             values = (
                 dot,
                 addr_disp,
                 e["name"],
                 _short_proto(e["protocol"]),
+                instance if instance is not None else "—",
+                vendor if vendor else "—",
+                role,
+                tokens if tokens else "",
                 last,
                 tx,
                 rx,
@@ -507,6 +532,31 @@ class LogView(ttk.Notebook):
 
 
 # ── module-level helpers ──────────────────────────────────────────────
+
+def _new_entry(
+    *,
+    name: str = "",
+    protocol: str = "",
+    last_seen: float | None = None,
+    count: int = 0,
+    rx_count: int = 0,
+    in_roster: bool = False,
+) -> dict:
+    return {
+        "name": name,
+        "protocol": protocol,
+        "last_seen": last_seen,
+        "count": count,
+        "rx_count": rx_count,
+        "in_roster": in_roster,
+        "iid": None,
+        "instance": None,
+        "vendor_id": None,
+        "vendor_name": "",
+        "mstp_role": "",
+        "token_count": 0,
+    }
+
 
 def _addr_sort(addr: str) -> int:
     try:
